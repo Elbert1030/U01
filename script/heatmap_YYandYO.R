@@ -240,10 +240,10 @@ print(tibble::as_tibble(cbind(clone_id = rownames(tbl_frac_YY),
                               as.data.frame(round(tbl_frac_YY, 4)))), n = Inf)
 
 # 可选：保存
-# write.csv(cbind(clone_id = rownames(tbl_counts_OO), as.data.frame(tbl_counts_OO)),
-#           "OO_clone_by_rep_counts.csv", row.names = FALSE)
-# write.csv(cbind(clone_id = rownames(tbl_frac_OO), as.data.frame(tbl_frac_OO)),
-#           "OO_clone_by_rep_fractions.csv", row.names = FALSE)
+ write.csv(cbind(clone_id = rownames(tbl_counts_YY), as.data.frame(tbl_counts_YY)),
+           file = file.path(out_dir,"YY_clone_by_rep_counts.csv"), row.names = FALSE)
+ write.csv(cbind(clone_id = rownames(tbl_frac_YY), as.data.frame(tbl_frac_YY)),
+           file = file.path(out_dir,"YY_clone_by_rep_fractions.csv"), row.names = FALSE)
 ## === OY: CloneID × (Rep1 / Rep2 / Rep3 / UnMapped) ===
 ## 与热图一致的行顺序；输出计数矩阵与行内比例矩阵
 
@@ -290,10 +290,10 @@ print(tibble::as_tibble(cbind(clone_id = rownames(tbl_frac_YO),
                               as.data.frame(round(tbl_frac_YO, 4)))), n = Inf)
 
 # 可选保存：
-# write.csv(cbind(clone_id = rownames(tbl_counts_OY), as.data.frame(tbl_counts_OY)),
-#           "OY_clone_by_rep_counts.csv", row.names = FALSE)
-# write.csv(cbind(clone_id = rownames(tbl_frac_OY), as.data.frame(tbl_frac_OY)),
-#           "OY_clone_by_rep_fractions.csv", row.names = FALSE)
+ write.csv(cbind(clone_id = rownames(tbl_counts_YO), as.data.frame(tbl_counts_YO)),
+           file = file.path(out_dir,"YO_clone_by_rep_counts.csv"), row.names = FALSE)
+ write.csv(cbind(clone_id = rownames(tbl_frac_YO), as.data.frame(tbl_frac_YO)),
+           "YO_clone_by_rep_fractions.csv", row.names = FALSE)
 library(ComplexHeatmap)
 
 ## === Step 1: 主要 replicate (每行最大值) ===
@@ -470,4 +470,56 @@ draw((row_ha_YY + ht_YY) + (row_ha_YO + ht_YO),
      heatmap_legend_side = "right",
      annotation_legend_side = "right")
 dev.off()
+
+library(dplyr)
+library(ggplot2)
+
+## 1) 用 clone × replicate 的 count 矩阵求总 clone size
+clone_size_YY <- rowSums(tbl_counts_YY)
+clone_size_YO <- rowSums(tbl_counts_YO)
+
+## 2) 合并成 dataframe
+df <- data.frame(
+  clone_id = intersect(names(clone_size_YY), names(clone_size_YO)),
+  size_YY  = clone_size_YY[intersect(names(clone_size_YY), names(clone_size_YO))],
+  size_YO  = clone_size_YO[intersect(names(clone_size_YY), names(clone_size_YO))]
+)
+
+## 3) 计算 log2FC (YY vs YO)，加 pseudocount=1 防止 log2(0)
+df <- df %>%
+  mutate(
+    log2FC    = log2((size_YY + 1) / (size_YO + 1)),
+    cloneSize = (size_YY + size_YO) / sum(size_YY + size_YO)  # 占比用于点大小
+  )
+
+## 4) 按 log2FC 排序并加 rank
+df <- df %>%
+  arrange(log2FC) %>%
+  mutate(rank = row_number())
+
+## 5) 绘图
+p <- ggplot(df, aes(x = rank, y = log2FC)) +
+  geom_point(aes(size = cloneSize, color = log2FC)) +
+  scale_color_gradient2(low="blue", mid="white", high="red", midpoint=0,
+                        limits=c(-6,6)) +
+  scale_size(range = c(1, 8)) +
+  theme_classic(base_size = 16) +
+  labs(
+    title = "YY vs YO Clone Size Comparison",
+    x = "Rank",
+    y = "log2FC (YY vs YO)",
+    color = "log2FC",
+    size = "Clone size"
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_hline(yintercept = c(-2.5, 2.5), linetype = "dashed") +
+  annotate("text", x = max(df$rank)*0.1, y = 3, label = "Clone size increased", color = "red") +
+  annotate("text", x = max(df$rank)*0.1, y = -3, label = "Clone size decreased", color = "blue")
+
+print(p)
+
+# 保存结果
+#out_dir <- "/project2/sli68423_1316/users/Kailiang/Test_Rcode/U1"
+#if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+#ggsave(file.path(out_dir, "YY_vs_YO_cloneSize_rankedLog2FC.png"), p, width=7, height=6, dpi=300)
 

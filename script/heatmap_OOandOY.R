@@ -12,7 +12,7 @@ suppressPackageStartupMessages({
 ## 健壮性检查
 seurat.vivo.cross<-readRDS("/project2/sli68423_1316/projects/U01_aim2/Cross_Expirement/PreProcessing/Harmony_integration_Cutoff_1K/cross.exp.combined.vivo.hto.celltag.annotation.rds")
 md <- seurat.vivo.cross@meta.data
-
+out_dir <- "/project2/sli68423_1316/users/Kailiang/Test_Rcode/U1"
 ## 函数（保持不变）
 get_clonal_matrix <- function(seurat, cluster_col, larry_col, sample_col,
                               samples_to_filt, min_cells, clusters_to_rm=NULL,
@@ -248,10 +248,10 @@ print(tibble::as_tibble(cbind(clone_id = rownames(tbl_frac_OO),
                               as.data.frame(round(tbl_frac_OO, 4)))), n = Inf)
 
 # 可选：保存
-# write.csv(cbind(clone_id = rownames(tbl_counts_OO), as.data.frame(tbl_counts_OO)),
-#           "OO_clone_by_rep_counts.csv", row.names = FALSE)
-# write.csv(cbind(clone_id = rownames(tbl_frac_OO), as.data.frame(tbl_frac_OO)),
-#           "OO_clone_by_rep_fractions.csv", row.names = FALSE)
+ write.csv(cbind(clone_id = rownames(tbl_counts_OO), as.data.frame(tbl_counts_OO)),
+           file = file.path(out_dir,"OO_clone_by_rep_counts.csv"), row.names = FALSE)
+ write.csv(cbind(clone_id = rownames(tbl_frac_OO), as.data.frame(tbl_frac_OO)),
+           file = file.path(out_dir,"OO_clone_by_rep_fractions.csv"), row.names = FALSE)
 ## === OY: CloneID × (Rep1 / Rep2 / Rep3 / UnMapped) ===
 ## 与热图一致的行顺序；输出计数矩阵与行内比例矩阵
 
@@ -298,10 +298,10 @@ print(tibble::as_tibble(cbind(clone_id = rownames(tbl_frac_OY),
                               as.data.frame(round(tbl_frac_OY, 4)))), n = Inf)
 
 # 可选保存：
-# write.csv(cbind(clone_id = rownames(tbl_counts_OY), as.data.frame(tbl_counts_OY)),
-#           "OY_clone_by_rep_counts.csv", row.names = FALSE)
-# write.csv(cbind(clone_id = rownames(tbl_frac_OY), as.data.frame(tbl_frac_OY)),
-#           "OY_clone_by_rep_fractions.csv", row.names = FALSE)
+ write.csv(cbind(clone_id = rownames(tbl_counts_OY), as.data.frame(tbl_counts_OY)),
+           file = file.path(out_dir,"OY_clone_by_rep_counts.csv"), row.names = FALSE)
+ write.csv(cbind(clone_id = rownames(tbl_frac_OY), as.data.frame(tbl_frac_OY)),
+           file = file.path(out_dir,"OY_clone_by_rep_fractions.csv"), row.names = FALSE)
 
 library(ComplexHeatmap)
 
@@ -479,4 +479,55 @@ draw(ht_all,
 #     heatmap_legend_side = "right",
 #     annotation_legend_side = "right")
 #dev.off()
+library(dplyr)
+library(ggplot2)
+
+## 1) 用 clone × replicate 的 count 矩阵求总 clone size
+clone_size_OO <- rowSums(tbl_counts_OO)
+clone_size_OY <- rowSums(tbl_counts_OY)
+
+## 2) 合并成 dataframe
+df <- data.frame(
+  clone_id = intersect(names(clone_size_OO), names(clone_size_OY)),
+  size_OO  = clone_size_OO[intersect(names(clone_size_OO), names(clone_size_OY))],
+  size_OY  = clone_size_OY[intersect(names(clone_size_OO), names(clone_size_OY))]
+)
+
+## 3) 计算 log2FC (OO vs OY)，加 pseudocount=1 防止 log2(0)
+df <- df %>%
+  mutate(
+    log2FC    = log2((size_OO + 1) / (size_OY + 1)),
+    cloneSize = (size_OO + size_OY) / sum(size_OO + size_OY)  # 占比用于点大小
+  )
+
+## 4) 按 log2FC 排序并加 rank
+df <- df %>%
+  arrange(log2FC) %>%
+  mutate(rank = row_number())
+
+## 5) 绘图
+p <- ggplot(df, aes(x = rank, y = log2FC)) +
+  geom_point(aes(size = cloneSize, color = log2FC)) +
+  scale_color_gradient2(low="blue", mid="white", high="red", midpoint=0,
+                        limits=c(-6,6)) +
+  scale_size(range = c(1, 8)) +
+  theme_classic(base_size = 16) +
+  labs(
+    title = "OO vs OY Clone Size Comparison",
+    x = "Rank",
+    y = "log2FC (OO vs OY)",
+    color = "log2FC",
+    size = "Clone size"
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_hline(yintercept = c(-2.5, 2.5), linetype = "dashed") +
+  annotate("text", x = max(df$rank)*0.1, y = 3, label = "Clone size increased", color = "red") +
+  annotate("text", x = max(df$rank)*0.1, y = -3, label = "Clone size decreased", color = "blue")
+
+print(p)
+
+# 保存结果
+#out_dir <- "/project2/sli68423_1316/users/Kailiang/Test_Rcode/U1"
+#if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+#ggsave(file.path(out_dir, "OO_vs_OY_cloneSize_rankedLog2FC.png"), p, width=7, height=6, dpi=300)
 
